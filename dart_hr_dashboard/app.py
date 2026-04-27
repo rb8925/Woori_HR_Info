@@ -409,6 +409,7 @@ emp_data, fin_data = _load()
 t1_raw      = build_table1(emp_data, fin_data, RECENT_YEAR)
 t1_raw_prev = build_table1(emp_data, fin_data, PREV_YEAR)
 t2_raw      = build_table2(emp_data, fin_data)
+t1_raw, t1_raw_prev, t2_raw = _apply_woori_override(t1_raw, t1_raw_prev, t2_raw, woori_ov)
 
 T1_ROW_LABELS = {
     "자기자본(억원)":   "자기자본 (억원)",
@@ -523,3 +524,218 @@ st.html(_render_table(t2_fmt, section_rows=True))
 st.caption("**순영업수익 계산식**: 세전이익 − 영업외손익 + 판관비")
 st.caption("**인당생산성**: 순영업수익 평균(백만원) ÷ 임직원수 평균 (조회기간 평균 기준)")
 st.caption("**\\*** 판관비 미공시로 판관비 제외 계산 (세전이익 − 영업외손익)")
+
+st.divider()
+
+# ── 엑셀 다운로드 ──────────────────────────────────────────────────────────────
+def _build_excel_bytes(fmt1: pd.DataFrame, fmt2: pd.DataFrame, fmt3: pd.DataFrame) -> bytes:
+    import io
+    import re as _re
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    # ── 스타일 팔레트 ──────────────────────────────────────────────────────────
+    def _fill(hex_): return PatternFill("solid", fgColor=hex_)
+    F_YL   = _fill("FFF8DC")  # 우리투자증권
+    F_GH   = _fill("D6EAF8")  # 그룹 헤더
+    F_TH   = _fill("F2F3F4")  # 일반 헤더
+    F_IDX  = _fill("F2F3F4")  # 인덱스 헤더
+    F_AVG  = _fill("EEF2F7")  # 그룹 평균
+    F_PROD = _fill("E9F7EF")  # 인당생산성
+    F_SEC  = _fill("EBF5FB")  # 섹션 셀
+
+    _thin = Side(style="thin", color="CCCCCC")
+    _bdr  = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+
+    def _c(ws, r, col, val="", fill=None, bold=False, italic=False, align="center"):
+        cell = ws.cell(row=r, column=col, value=str(val) if val != "" else "")
+        cell.border = _bdr
+        if fill:
+            cell.fill = fill
+        cell.font = Font(bold=bold, italic=italic, size=10,
+                         color="FFFFFF" if fill == F_GH and bold else "000000")
+        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=False)
+        return cell
+
+    def _auto_width(ws):
+        for col in ws.columns:
+            w = max((len(str(cell.value or "")) for cell in col), default=6)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(w + 2, 22)
+
+    # ── 시트 공통: 2행 헤더 + 데이터 ─────────────────────────────────────────
+    def _write_t1(ws, df: pd.DataFrame):
+        companies = list(df.columns)
+
+        # 그룹 묶기
+        grp_blocks: list[list] = []
+        for co in companies:
+            g = COMPANY_GROUP.get(co, "")
+            if grp_blocks and grp_blocks[-1][0] == g:
+                grp_blocks[-1][1].append(co)
+            else:
+                grp_blocks.append([g, [co]])
+
+        # 헤더 행 1: 인덱스 + 그룹명
+        _c(ws, 1, 1, "구분", fill=F_IDX, bold=True)
+        ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+
+        col = 2
+        for g, cos in grp_blocks:
+            if not g:
+                for co in cos:
+                    fill = F_YL if co == HIGHLIGHT_CO else F_TH
+                    _c(ws, 1, col, co, fill=fill, bold=True)
+                    ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
+                    col += 1
+            else:
+                _c(ws, 1, col, g, fill=F_GH, bold=True)
+                if len(cos) > 1:
+                    ws.merge_cells(start_row=1, start_column=col,
+                                   end_row=1, end_column=col + len(cos) - 1)
+                for co in cos:
+                    fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else F_TH)
+                    disp = "평균" if co in AVG_COLS else co
+                    _c(ws, 2, col, disp, fill=fill, bold=True, italic=(co in AVG_COLS))
+                    col += 1
+
+        # 데이터 행
+        for ri, lbl in enumerate(df.index, start=3):
+            _c(ws, ri, 1, lbl, bold=True, align="left")
+            for ci, co in enumerate(companies, start=2):
+                val = df.loc[lbl, co]
+                fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else None)
+                _c(ws, ri, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
+
+        ws.row_dimensions[1].height = 18
+        ws.row_dimensions[2].height = 18
+        ws.freeze_panes = ws.cell(row=3, column=2)
+        _auto_width(ws)
+
+    def _pre_fill(ws, r1, c1, r2, c2, fill):
+        """merge 전 영역 전체에 fill/border 적용 (MergedCell 쓰기 오류 방지)."""
+        for ri in range(r1, r2 + 1):
+            for ci in range(c1, c2 + 1):
+                cell = ws.cell(row=ri, column=ci)
+                cell.fill = fill
+                cell.border = _bdr
+
+    def _write_t2(ws, df: pd.DataFrame):
+        companies = list(df.columns)
+
+        grp_blocks: list[list] = []
+        for co in companies:
+            g = COMPANY_GROUP.get(co, "")
+            if grp_blocks and grp_blocks[-1][0] == g:
+                grp_blocks[-1][1].append(co)
+            else:
+                grp_blocks.append([g, [co]])
+
+        # 헤더 행 1: 인덱스(2열) + 그룹명 — merge 전에 전체 영역 fill 적용
+        _pre_fill(ws, 1, 1, 2, 2, F_IDX)
+        _c(ws, 1, 1, "구분", fill=F_IDX, bold=True)
+        ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=2)
+
+        col = 3
+        for g, cos in grp_blocks:
+            if not g:
+                for co in cos:
+                    fill = F_YL if co == HIGHLIGHT_CO else F_TH
+                    _c(ws, 1, col, co, fill=fill, bold=True)
+                    ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
+                    col += 1
+            else:
+                _c(ws, 1, col, g, fill=F_GH, bold=True)
+                if len(cos) > 1:
+                    ws.merge_cells(start_row=1, start_column=col,
+                                   end_row=1, end_column=col + len(cos) - 1)
+                for co in cos:
+                    fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else F_TH)
+                    disp = "평균" if co in AVG_COLS else co
+                    _c(ws, 2, col, disp, fill=fill, bold=True, italic=(co in AVG_COLS))
+                    col += 1
+
+        def _sec(lbl):
+            if "임직원수" in lbl:   return "임직원수"
+            if "순영업수익" in lbl: return "순영업수익"
+            return ""
+
+        SEC_DISPLAY = {"임직원수": "임직원수 (명)", "순영업수익": "순영업수익 (억원)"}
+
+        def _disp(lbl, sec):
+            if sec in ("임직원수", "순영업수익"):
+                if "평균" in lbl: return "평균"
+                m = _re.search(r"(\d{4})", lbl)
+                return f"{m.group(1)[2:]}년 12월" if m else lbl
+            return lbl
+
+        labels = list(df.index)
+        sec_groups: list[list] = []
+        for lbl in labels:
+            s = _sec(lbl)
+            if sec_groups and sec_groups[-1][0] == s:
+                sec_groups[-1][1].append(lbl)
+            else:
+                sec_groups.append([s, [lbl]])
+
+        r = 3
+        for sec, lbls in sec_groups:
+            is_prod = (sec == "")
+            sec_start = r
+            for j, lbl in enumerate(lbls):
+                if is_prod:
+                    # merge 전 두 셀 모두 fill 적용
+                    _pre_fill(ws, r, 1, r, 2, F_PROD)
+                    _c(ws, r, 1, _disp(lbl, sec), fill=F_PROD, bold=True, align="left")
+                    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+                else:
+                    if j == 0:
+                        # merge 전 섹션 전체 행의 열1 fill 적용
+                        _pre_fill(ws, r, 1, r + len(lbls) - 1, 1, F_SEC)
+                        _c(ws, r, 1, SEC_DISPLAY.get(sec, sec), fill=F_SEC, bold=True)
+                        if len(lbls) > 1:
+                            ws.merge_cells(start_row=r, start_column=1,
+                                           end_row=r + len(lbls) - 1, end_column=1)
+                    # j > 0 이면 열1은 MergedCell — 건드리지 않음
+                    _c(ws, r, 2, _disp(lbl, sec), bold=True, align="left")
+
+                for ci, co in enumerate(companies, start=3):
+                    val = df.loc[lbl, co]
+                    fill = (F_PROD if is_prod else
+                            F_AVG  if co in AVG_COLS else
+                            F_YL   if co == HIGHLIGHT_CO else None)
+                    _c(ws, r, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
+                r += 1
+
+        ws.row_dimensions[1].height = 18
+        ws.row_dimensions[2].height = 18
+        ws.freeze_panes = ws.cell(row=3, column=3)
+        _auto_width(ws)
+
+    wb = Workbook()
+
+    ws1 = wb.active
+    ws1.title = f"인력현황_{RECENT_YEAR}"
+    _write_t1(ws1, fmt1)
+
+    ws2 = wb.create_sheet(f"인력현황_{PREV_YEAR}")
+    _write_t1(ws2, fmt2)
+
+    ws3 = wb.create_sheet("추이분석")
+    _write_t2(ws3, fmt3)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+_fmt1_xl = _merge_pct_rows(format_df(add_group_averages(t1_raw))).rename(index=T1_ROW_LABELS)
+_fmt2_xl = _merge_pct_rows(format_df(add_group_averages(t1_raw_prev))).rename(index=T1_ROW_LABELS)
+
+st.download_button(
+    label="📥 엑셀 다운로드",
+    data=_build_excel_bytes(_fmt1_xl, _fmt2_xl, t2_fmt),
+    file_name=f"증권사_인력현황_{RECENT_YEAR}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=False,
+)

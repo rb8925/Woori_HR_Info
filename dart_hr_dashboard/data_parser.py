@@ -215,6 +215,9 @@ def _net_op_revenue(fin: dict | None) -> int | None:
     if None in (a, b):
         return None
     c = fin.get("판관비")
+    # 판관비는 비용이므로 항상 양수여야 함 — 음수로 파싱된 경우 절대값 사용
+    if c is not None and c < 0:
+        c = abs(c)
     return a - b + (c if c is not None else 0)
 
 # ── 테이블 빌더 ───────────────────────────────────────────────────────────────
