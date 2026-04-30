@@ -2,8 +2,8 @@
 .env
 dart_hr_dashboard/.streamlit/secrets.toml
 
-# DART 캐시 데이터
-dart_hr_dashboard/data/
+# DART 캐시 데이터 (raw_cache.json은 Streamlit Cloud 배포용으로 git 추적)
+dart_hr_dashboard/data/*.json.bak
 
 # Python 캐시
 __pycache__/
