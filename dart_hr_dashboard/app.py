@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data_parser import (
+    CACHE_PATH,
     COMPANIES,
     PREV_YEAR,
     RECENT_YEAR,
@@ -358,8 +359,8 @@ with st.sidebar:
         if correct_pw and pw_input == correct_pw:
             if st.button("DART 데이터 재수집", type="primary", width='stretch'):
                 _load.clear()
-                if os.path.exists("data/raw_cache.json"):
-                    os.remove("data/raw_cache.json")
+                if CACHE_PATH.exists():
+                    CACHE_PATH.unlink()
                 st.rerun()
         elif pw_input:
             st.error("비밀번호가 틀렸습니다.")
@@ -405,7 +406,6 @@ st.caption(f"기준: {RECENT_YEAR}년 사업보고서 | 개별재무제표 | DAR
            f"노란색 열 = {HIGHLIGHT_CO}")
 
 # ── 데이터 로드 ───────────────────────────────────────────────────────────────
-from data_parser import CACHE_PATH
 with st.expander("🔍 디버그 (임시)", expanded=False):
     st.write("캐시 경로:", str(CACHE_PATH))
     st.write("캐시 존재:", CACHE_PATH.exists())
