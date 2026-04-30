@@ -356,7 +356,7 @@ with st.sidebar:
         pw_input = st.text_input("비밀번호", type="password", key="refresh_pw")
         correct_pw = _refresh_password()
         if correct_pw and pw_input == correct_pw:
-            if st.button("DART 데이터 재수집", type="primary", use_container_width=True):
+            if st.button("DART 데이터 재수집", type="primary", width='stretch'):
                 _load.clear()
                 if os.path.exists("data/raw_cache.json"):
                     os.remove("data/raw_cache.json")
@@ -494,7 +494,7 @@ fig.update_layout(
     plot_bgcolor="white",
     yaxis=dict(gridcolor="#EEEEEE"),
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 st.divider()
 
@@ -737,5 +737,5 @@ st.download_button(
     data=_build_excel_bytes(_fmt1_xl, _fmt2_xl, t2_fmt),
     file_name=f"증권사_인력현황_{RECENT_YEAR}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=False,
+    width='content',
 )
