@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dart_api import COMPANIES, fetch_employee_info, fetch_financial_stmt
+from dart_api import COMPANIES, fetch_employee_info, fetch_financial_stmt, fetch_pangwanbi_from_html
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
 RECENT_YEAR = 2025
@@ -164,6 +164,19 @@ def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict]:
             if prv:
                 fin_data[company][prv_yr] = prv
             print(f"  재무 {query_year}→ cur={'OK' if cur else '-'}, prv={'OK' if prv else '-'}")
+
+        # 판관비 HTML 폴백: fnlttSinglAcntAll에 판관비가 없는 회사(메리츠증권 등)는
+        # 영업보고서 HTML에서 판매관리비를 추출한다.
+        # bsns_year=2024 보고서 한 번으로 2024·2023·2022 세 연도 값을 커버.
+        missing_years = [y for y in TREND_YEARS if fin_data[company].get(y, {}).get("판관비") is None]
+        if missing_years:
+            html_pg = fetch_pangwanbi_from_html(corp_code, TREND_YEARS[1])  # 2024 사보
+            for yr, amount in html_pg.items():
+                if yr in fin_data[company] and fin_data[company][yr].get("판관비") is None:
+                    fin_data[company][yr]["판관비"] = amount
+            if html_pg:
+                covered = [y for y in missing_years if y in html_pg]
+                print(f"  HTML판관비 보완: {covered}")
 
     _save_cache({"emp_data": {
         co: {str(y): rows for y, rows in yrs.items()}
