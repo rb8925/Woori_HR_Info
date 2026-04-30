@@ -25,7 +25,6 @@ def _get_api_key() -> str:
         key = os.getenv("DART_API_KEY", "")
     return key
 
-API_KEY = _get_api_key()
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 # corp_code는 DART XML 전체 목록에서 확인한 정확한 값 사용
@@ -62,7 +61,7 @@ def fetch_employee_info(corp_code: str, year: int) -> list[dict]:
     """
     url = f"{BASE_URL}/empSttus.json"
     params = {
-        "crtfc_key": API_KEY,
+        "crtfc_key": _get_api_key(),
         "corp_code": corp_code,
         "bsns_year": str(year),
         "reprt_code": "11011",  # 사업보고서 고정 코드
@@ -96,7 +95,7 @@ def fetch_financial_stmt(corp_code: str, year: int, delay: float = 0.3) -> tuple
     """
     url = f"{BASE_URL}/fnlttSinglAcntAll.json"
     params = {
-        "crtfc_key": API_KEY,
+        "crtfc_key": _get_api_key(),
         "corp_code": corp_code,
         "bsns_year": str(year),
         "reprt_code": "11011",
@@ -236,7 +235,7 @@ def fetch_pangwanbi_from_html(corp_code: str, bsns_year: int, delay: float = 0.5
     # 1. 사업보고서 접수번호 조회
     try:
         resp = requests.get(f"{BASE_URL}/list.json", params={
-            "crtfc_key": API_KEY,
+            "crtfc_key": _get_api_key(),
             "corp_code": corp_code,
             "bgn_de": f"{bsns_year}0101",
             "end_de": f"{bsns_year + 1}0630",
