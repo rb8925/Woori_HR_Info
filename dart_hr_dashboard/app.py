@@ -26,6 +26,8 @@ st.set_page_config(
 HIGHLIGHT_CO   = "우리투자증권"
 HIGHLIGHT_BG   = "#FFF8DC"   # 연한 노란색
 HEADER_BG      = "#1A5276"
+SUB_REG_BG     = "#E8F8F5"   # 정규직 sub-row 배경 (연한 청록)
+SUB_CNT_BG     = "#F5EEF8"   # 기간제 sub-row 배경 (연한 보라)
 
 GROUPS_DEF: dict[str, list[str]] = {
     "대형사":    ["미래에셋증권", "한국투자증권", "NH투자증권", "KB증권"],
@@ -69,17 +71,29 @@ def _fmt(v, kind: str) -> str:
 
 # 행(지표)별 포맷 타입 정의
 _ROW_FMT: dict[str, str] = {
-    "자기자본(억원)":       "int",
-    "리테일 인원":          "int",
-    "리테일 비중(%)":       "pct",
-    "본사영업 인원":        "int",
-    "본사영업 비중(%)":     "pct",
-    "본사관리 인원":        "int",
-    "본사관리 비중(%)":     "pct",
-    "총인원":               "int",
-    "인당생산성(백만원/인)": "decimal",
-    "임직원수 평균":         "int",
-    "순영업수익 평균(억원)": "int",
+    "자기자본(억원)":         "int",
+    "리테일 인원":            "int",
+    "리테일 비중(%)":         "pct",
+    "리테일 정규직 인원":      "int",
+    "리테일 정규직 비중(%)":   "pct",
+    "리테일 기간제 인원":      "int",
+    "리테일 기간제 비중(%)":   "pct",
+    "본사영업 인원":          "int",
+    "본사영업 비중(%)":       "pct",
+    "본사영업 정규직 인원":    "int",
+    "본사영업 정규직 비중(%)": "pct",
+    "본사영업 기간제 인원":    "int",
+    "본사영업 기간제 비중(%)": "pct",
+    "본사관리 인원":          "int",
+    "본사관리 비중(%)":       "pct",
+    "본사관리 정규직 인원":    "int",
+    "본사관리 정규직 비중(%)": "pct",
+    "본사관리 기간제 인원":    "int",
+    "본사관리 기간제 비중(%)": "pct",
+    "총인원":                 "int",
+    "인당생산성(백만원/인)":   "decimal",
+    "임직원수 평균":           "int",
+    "순영업수익 평균(억원)":   "int",
     **{f"임직원수 {y}년":        "int" for y in TREND_YEARS},
     **{f"순영업수익 {y}년(억원)": "int" for y in TREND_YEARS},
 }
@@ -96,9 +110,15 @@ def format_df(df: pd.DataFrame) -> pd.DataFrame:
 def _merge_pct_rows(df: pd.DataFrame) -> pd.DataFrame:
     """인원 행과 비중 행을 '1,213 (36.8%)' 형식으로 합쳐 단일 행으로 만듦 (포맷된 문자열 DataFrame에 적용)."""
     pairs = [
-        ("리테일 인원",   "리테일 비중(%)"),
-        ("본사영업 인원", "본사영업 비중(%)"),
-        ("본사관리 인원", "본사관리 비중(%)"),
+        ("리테일 인원",             "리테일 비중(%)"),
+        ("리테일 정규직 인원",       "리테일 정규직 비중(%)"),
+        ("리테일 기간제 인원",       "리테일 기간제 비중(%)"),
+        ("본사영업 인원",           "본사영업 비중(%)"),
+        ("본사영업 정규직 인원",     "본사영업 정규직 비중(%)"),
+        ("본사영업 기간제 인원",     "본사영업 기간제 비중(%)"),
+        ("본사관리 인원",           "본사관리 비중(%)"),
+        ("본사관리 정규직 인원",     "본사관리 정규직 비중(%)"),
+        ("본사관리 기간제 인원",     "본사관리 기간제 비중(%)"),
     ]
     skip = {p for _, p in pairs}
     pair_map = {h: p for h, p in pairs}
@@ -152,24 +172,26 @@ def _render_table(df_fmt: pd.DataFrame, section_rows: bool = False) -> str:
         else:
             col_groups.append([g, [co]])
 
-    PROD_BG = "#E9F7EF"   # 인당생산성 행 배경색
-    AVG_BG  = "#EEF2F7"   # 그룹 평균 열 배경색
+    PROD_BG    = "#E9F7EF"   # 인당생산성 행 배경색
+    AVG_BG     = "#EEF2F7"   # 그룹 평균 열 배경색
+    SEC_HDR_BG = "#EDF4FC"   # 인원 섹션 헤더 행 배경색
     S = {
-        "tbl":        "border-collapse:collapse;width:100%;font-size:13px;font-family:sans-serif;",
-        "th":         "border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:#F2F3F4;",
-        "th_hl":      "border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:#FFF8DC;",
-        "th_grp":     "border:1px solid #ccc;padding:6px 10px;font-weight:700;white-space:nowrap;text-align:center;background:#D6EAF8;",
-        "th_idx":     "border:1px solid #ccc;padding:6px 10px;font-weight:700;white-space:nowrap;text-align:center;background:#F2F3F4;",
-        "th_avg":     f"border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:{AVG_BG};font-style:italic;",
-        "td":         "border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;",
-        "td_hl":      "border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:#FFF8DC;font-weight:600;",
-        "td_avg":     f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{AVG_BG};font-style:italic;",
-        "td_row":     "border:1px solid #ccc;padding:5px 10px;font-weight:600;text-align:left;white-space:nowrap;",
-        "td_sec":     "border:1px solid #ccc;padding:5px 10px;font-weight:700;text-align:center;vertical-align:middle;background:#EBF5FB;white-space:nowrap;",
-        "td_prod":    f"border:1px solid #ccc;padding:5px 10px;font-weight:700;text-align:left;white-space:nowrap;background:{PROD_BG};",
-        "td_prod_d":  f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};",
-        "td_prod_hl": f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};font-weight:600;",
-        "td_prod_avg":f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};font-style:italic;",
+        "tbl":         "border-collapse:collapse;width:100%;font-size:13px;font-family:sans-serif;",
+        "th":          "border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:#F2F3F4;",
+        "th_hl":       "border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:#FFF8DC;",
+        "th_grp":      "border:1px solid #ccc;padding:6px 10px;font-weight:700;white-space:nowrap;text-align:center;background:#D6EAF8;",
+        "th_idx":      "border:1px solid #ccc;padding:6px 10px;font-weight:700;white-space:nowrap;text-align:center;background:#F2F3F4;",
+        "th_avg":      f"border:1px solid #ccc;padding:6px 10px;font-weight:600;white-space:nowrap;text-align:center;background:{AVG_BG};font-style:italic;",
+        "td":          "border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;",
+        "td_hl":       "border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:#FFF8DC;font-weight:600;",
+        "td_avg":      f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{AVG_BG};font-style:italic;",
+        "td_row":      "border:1px solid #ccc;padding:5px 10px;font-weight:600;text-align:left;white-space:nowrap;",
+        "td_row_sec":  f"border:1px solid #ccc;border-top:2px solid #8BADC8;padding:5px 10px;font-weight:700;text-align:left;white-space:nowrap;background:{SEC_HDR_BG};",
+        "td_sec":      "border:1px solid #ccc;padding:5px 10px;font-weight:700;text-align:center;vertical-align:middle;background:#EBF5FB;white-space:nowrap;",
+        "td_prod":     f"border:1px solid #ccc;padding:5px 10px;font-weight:700;text-align:left;white-space:nowrap;background:{PROD_BG};",
+        "td_prod_d":   f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};",
+        "td_prod_hl":  f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};font-weight:600;",
+        "td_prod_avg": f"border:1px solid #ccc;padding:5px 10px;text-align:right;white-space:nowrap;background:{PROD_BG};font-style:italic;",
     }
 
     n_idx = 2 if section_rows else 1
@@ -248,9 +270,41 @@ def _render_table(df_fmt: pd.DataFrame, section_rows: bool = False) -> str:
                 cells += [_td(df_fmt.loc[lbl, co], co, prod=is_prod) for co in companies]
                 body_rows.append(f'<tr>{"".join(cells)}</tr>')
     else:
+        _SECTION_HDRS = {"리테일 인원", "본사영업 인원", "본사관리 인원"}
+
+        def _sub_kind(lbl: str) -> str | None:
+            for sec in ("리테일", "본사영업", "본사관리"):
+                for et in ("정규직", "기간제"):
+                    if lbl == f"{sec} {et} 인원":
+                        return et
+            return None
+
         for lbl in labels:
-            cells = [f'<td style="{S["td_row"]}">{lbl}</td>']
-            cells += [_td(df_fmt.loc[lbl, co], co) for co in companies]
+            kind = _sub_kind(lbl)
+            if kind:
+                bg        = SUB_REG_BG if kind == "정규직" else SUB_CNT_BG
+                txt_color = "#1A8C6E"  if kind == "정규직" else "#7D3C98"
+                lbl_cell  = (
+                    f'<td style="border:1px solid #ddd;padding:4px 8px;text-align:left;'
+                    f'white-space:nowrap;font-size:12px;background:{bg};">'
+                    f'<span style="color:{txt_color};padding-left:10px;">▸ {kind}</span></td>'
+                )
+                cells = [lbl_cell]
+                for co in companies:
+                    val     = df_fmt.loc[lbl, co]
+                    is_avg  = co in AVG_COLS
+                    cell_bg = AVG_BG if is_avg else (HIGHLIGHT_BG if co == HIGHLIGHT_CO else bg)
+                    fw      = "font-weight:600;" if co == HIGHLIGHT_CO and not is_avg else ""
+                    fi      = "font-style:italic;" if is_avg else ""
+                    cell_s  = (f"border:1px solid #ddd;padding:4px 9px;text-align:right;"
+                               f"white-space:nowrap;background:{cell_bg};font-size:12px;{fw}{fi}")
+                    cells.append(f'<td style="{cell_s}">{val}</td>')
+            elif lbl in _SECTION_HDRS:
+                cells = [f'<td style="{S["td_row_sec"]}">{lbl}</td>']
+                cells += [_td(df_fmt.loc[lbl, co], co) for co in companies]
+            else:
+                cells = [f'<td style="{S["td_row"]}">{lbl}</td>']
+                cells += [_td(df_fmt.loc[lbl, co], co) for co in companies]
             body_rows.append(f'<tr>{"".join(cells)}</tr>')
 
     tbody = f'<tbody>{"".join(body_rows)}</tbody>'
@@ -311,6 +365,33 @@ def _apply_woori_override(t1_recent: pd.DataFrame, t1_prev: pd.DataFrame,
             raw.loc["자기자본(억원)", co] = float(d["자기자본"])
         if d.get("총인원") is not None:
             raw.loc["총인원", co] = int(d["총인원"])
+
+        # 섹션별 정규직/기간제 반영
+        total_val = raw.loc["총인원", co]
+        total_ok  = (total_val is not None
+                     and not (isinstance(total_val, float) and pd.isna(total_val))
+                     and total_val > 0)
+        for sec in ("리테일", "본사영업", "본사관리"):
+            reg = d.get(f"{sec}_정규직")
+            cnt = d.get(f"{sec}_기간제")
+            if reg is None and cnt is None:
+                continue
+            reg = reg or 0
+            cnt = cnt or 0
+            sec_tot = reg + cnt
+            if sec_tot > 0:
+                raw.loc[f"{sec} 인원", co]          = sec_tot
+                raw.loc[f"{sec} 비중(%)", co]        = (
+                    round(sec_tot / total_val * 100, 1) if total_ok else None
+                )
+            raw.loc[f"{sec} 정규직 인원", co]        = reg if reg > 0 else None
+            raw.loc[f"{sec} 기간제 인원", co]        = cnt if cnt > 0 else None
+            raw.loc[f"{sec} 정규직 비중(%)", co]     = (
+                round(reg / sec_tot * 100, 1) if sec_tot > 0 else None
+            )
+            raw.loc[f"{sec} 기간제 비중(%)", co]     = (
+                round(cnt / sec_tot * 100, 1) if sec_tot > 0 else None
+            )
 
     for yr in TREND_YEARS:
         d = ov.get(yr, {})
@@ -378,7 +459,7 @@ with st.sidebar:
 - 우리투자증권: 2024년이 첫 사업보고서 (이전 연도 N/A)
 - 메리츠증권: 판관비 미공시 → 순영업수익 N/A
 - 순영업수익 2022년: DART API 미제공 (전사 N/A)
-- 우리투자증권 섹션 구분: DART 미신고 (총인원만 표시)
+- 우리투자증권 섹션 구분: DART 미신고 → 아래 직접입력으로 반영 가능
 """)
 
     st.divider()
@@ -398,6 +479,24 @@ with st.sidebar:
             v = st.number_input("순영업수익 (억원)", min_value=0, value=0,
                                 step=10, key=f"ov_nr_{y}")
             d["순영업수익"] = float(v) if v else None
+
+            if y in (RECENT_YEAR, PREV_YEAR):
+                st.caption("섹션별 인원 (정규직 / 기간제)")
+                for sec in ("리테일", "본사영업", "본사관리"):
+                    st.markdown(f"<small style='color:#555;'>**{sec}**</small>",
+                                unsafe_allow_html=True)
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        vr = st.number_input("정규직", min_value=0, value=0,
+                                             step=1, key=f"ov_{sec}_reg_{y}",
+                                             label_visibility="visible")
+                        d[f"{sec}_정규직"] = int(vr) if vr else None
+                    with c2:
+                        vc = st.number_input("기간제", min_value=0, value=0,
+                                             step=1, key=f"ov_{sec}_cnt_{y}",
+                                             label_visibility="visible")
+                        d[f"{sec}_기간제"] = int(vc) if vc else None
+
             woori_ov[y] = d
 
 # ── 타이틀 ────────────────────────────────────────────────────────────────────
@@ -544,13 +643,16 @@ def _build_excel_bytes(fmt1: pd.DataFrame, fmt2: pd.DataFrame, fmt3: pd.DataFram
 
     # ── 스타일 팔레트 ──────────────────────────────────────────────────────────
     def _fill(hex_): return PatternFill("solid", fgColor=hex_)
-    F_YL   = _fill("FFF8DC")  # 우리투자증권
-    F_GH   = _fill("D6EAF8")  # 그룹 헤더
-    F_TH   = _fill("F2F3F4")  # 일반 헤더
-    F_IDX  = _fill("F2F3F4")  # 인덱스 헤더
-    F_AVG  = _fill("EEF2F7")  # 그룹 평균
-    F_PROD = _fill("E9F7EF")  # 인당생산성
-    F_SEC  = _fill("EBF5FB")  # 섹션 셀
+    F_YL      = _fill("FFF8DC")  # 우리투자증권
+    F_GH      = _fill("D6EAF8")  # 그룹 헤더
+    F_TH      = _fill("F2F3F4")  # 일반 헤더
+    F_IDX     = _fill("F2F3F4")  # 인덱스 헤더
+    F_AVG     = _fill("EEF2F7")  # 그룹 평균
+    F_PROD    = _fill("E9F7EF")  # 인당생산성
+    F_SEC     = _fill("EBF5FB")  # 섹션 셀
+    F_SEC_HDR = _fill("EDF4FC")  # 인원 섹션 헤더 (리테일/본사영업/본사관리)
+    F_SUB_REG = _fill("E8F8F5")  # 정규직 sub-row
+    F_SUB_CNT = _fill("F5EEF8")  # 기간제 sub-row
 
     _thin = Side(style="thin", color="CCCCCC")
     _bdr  = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
@@ -607,12 +709,37 @@ def _build_excel_bytes(fmt1: pd.DataFrame, fmt2: pd.DataFrame, fmt3: pd.DataFram
                     col += 1
 
         # 데이터 행
+        _XL_SEC_HDRS = {"리테일 인원", "본사영업 인원", "본사관리 인원"}
+
+        def _xl_sub_kind(lbl: str) -> str | None:
+            for sec in ("리테일", "본사영업", "본사관리"):
+                for et in ("정규직", "기간제"):
+                    if lbl == f"{sec} {et} 인원":
+                        return et
+            return None
+
         for ri, lbl in enumerate(df.index, start=3):
-            _c(ws, ri, 1, lbl, bold=True, align="left")
-            for ci, co in enumerate(companies, start=2):
-                val = df.loc[lbl, co]
-                fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else None)
-                _c(ws, ri, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
+            kind = _xl_sub_kind(lbl)
+            if kind:
+                sub_fill = F_SUB_REG if kind == "정규직" else F_SUB_CNT
+                _c(ws, ri, 1, f"  ▸ {kind}", fill=sub_fill, bold=False, align="left")
+                for ci, co in enumerate(companies, start=2):
+                    val  = df.loc[lbl, co]
+                    fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else sub_fill)
+                    _c(ws, ri, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
+                ws.row_dimensions[ri].height = 14
+            elif lbl in _XL_SEC_HDRS:
+                _c(ws, ri, 1, lbl, fill=F_SEC_HDR, bold=True, align="left")
+                for ci, co in enumerate(companies, start=2):
+                    val  = df.loc[lbl, co]
+                    fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else F_SEC_HDR)
+                    _c(ws, ri, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
+            else:
+                _c(ws, ri, 1, lbl, bold=True, align="left")
+                for ci, co in enumerate(companies, start=2):
+                    val  = df.loc[lbl, co]
+                    fill = F_AVG if co in AVG_COLS else (F_YL if co == HIGHLIGHT_CO else None)
+                    _c(ws, ri, ci, val, fill=fill, italic=(co in AVG_COLS), align="right")
 
         ws.row_dimensions[1].height = 18
         ws.row_dimensions[2].height = 18

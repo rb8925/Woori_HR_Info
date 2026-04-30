@@ -193,31 +193,48 @@ def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict]:
 def _headcount_by_section(rows: list[dict], sec_map: dict | None) -> dict:
     """
     rows: empSttus API rows (성별×섹션 단위)
-    반환: {"리테일": n|None, "본사영업": n|None, "본사관리": n|None, "총인원": n}
+    반환: 섹션별 총인원·정규직(rgllbr_co)·기간제(cnttk_co) + 총인원
     """
     total = sum(_safe_int(r.get("sm", 0)) for r in rows)
 
     if sec_map is None:
-        return {"리테일": None, "본사영업": None, "본사관리": None, "총인원": total}
+        return {
+            "리테일": None, "리테일 정규직": None, "리테일 기간제": None,
+            "본사영업": None, "본사영업 정규직": None, "본사영업 기간제": None,
+            "본사관리": None, "본사관리 정규직": None, "본사관리 기간제": None,
+            "총인원": total,
+        }
 
-    counts = {cat: (0 if patterns else None) for cat, patterns in sec_map.items()}
-    counts.setdefault("리테일", None)
-    counts.setdefault("본사영업", None)
-    counts.setdefault("본사관리", None)
+    counts   = {cat: (0 if patterns else None) for cat, patterns in sec_map.items()}
+    reg_cnts = {cat: (0 if patterns else None) for cat, patterns in sec_map.items()}
+    cnt_cnts = {cat: (0 if patterns else None) for cat, patterns in sec_map.items()}
+    for d in (counts, reg_cnts, cnt_cnts):
+        d.setdefault("리테일", None)
+        d.setdefault("본사영업", None)
+        d.setdefault("본사관리", None)
+
     for row in rows:
         bbm = row.get("fo_bbm", "")
         sm  = _safe_int(row.get("sm", 0))
+        reg = _safe_int(row.get("rgllbr_co", 0))
+        cnt = _safe_int(row.get("cnttk_co", 0))
         matched = False
         for cat, patterns in sec_map.items():
             if _match(bbm, patterns):
-                counts[cat] += sm
+                counts[cat]   += sm
+                reg_cnts[cat] += reg
+                cnt_cnts[cat] += cnt
                 matched = True
                 break
         if not matched:
-            # 매핑 안 된 섹션은 경고만 출력 (데이터 손실 방지)
             print(f"  [매핑 없음] fo_bbm='{bbm}', sm={sm}")
 
-    return {**counts, "총인원": total}
+    result: dict = {"총인원": total}
+    for cat in ("리테일", "본사영업", "본사관리"):
+        result[cat]            = counts.get(cat)
+        result[f"{cat} 정규직"] = reg_cnts.get(cat)
+        result[f"{cat} 기간제"] = cnt_cnts.get(cat)
+    return result
 
 
 def _net_op_revenue(fin: dict | None) -> int | None:
@@ -255,15 +272,31 @@ def build_table1(emp_data: dict, fin_data: dict, year: int = RECENT_YEAR) -> pd.
         def pct(n):
             return round(n / total * 100, 1) if (n is not None and total > 0) else None
 
+        def sub_pct(n, reg, cnt):
+            denom = (reg or 0) + (cnt or 0)
+            return round(n / denom * 100, 1) if (n is not None and denom > 0) else None
+
         rows[company] = {
-            "자기자본(억원)":     _억(fin.get("자기자본") if fin else None),
-            "리테일 인원":        hc["리테일"],
-            "리테일 비중(%)":     pct(hc["리테일"]),
-            "본사영업 인원":      hc["본사영업"],
-            "본사영업 비중(%)":   pct(hc["본사영업"]),
-            "본사관리 인원":      hc["본사관리"],
-            "본사관리 비중(%)":   pct(hc["본사관리"]),
-            "총인원":             total,
+            "자기자본(억원)":         _억(fin.get("자기자본") if fin else None),
+            "리테일 인원":            hc["리테일"],
+            "리테일 비중(%)":         pct(hc["리테일"]),
+            "리테일 정규직 인원":      hc["리테일 정규직"],
+            "리테일 정규직 비중(%)":   sub_pct(hc["리테일 정규직"], hc["리테일 정규직"], hc["리테일 기간제"]),
+            "리테일 기간제 인원":      hc["리테일 기간제"],
+            "리테일 기간제 비중(%)":   sub_pct(hc["리테일 기간제"], hc["리테일 정규직"], hc["리테일 기간제"]),
+            "본사영업 인원":          hc["본사영업"],
+            "본사영업 비중(%)":       pct(hc["본사영업"]),
+            "본사영업 정규직 인원":    hc["본사영업 정규직"],
+            "본사영업 정규직 비중(%)": sub_pct(hc["본사영업 정규직"], hc["본사영업 정규직"], hc["본사영업 기간제"]),
+            "본사영업 기간제 인원":    hc["본사영업 기간제"],
+            "본사영업 기간제 비중(%)": sub_pct(hc["본사영업 기간제"], hc["본사영업 정규직"], hc["본사영업 기간제"]),
+            "본사관리 인원":          hc["본사관리"],
+            "본사관리 비중(%)":       pct(hc["본사관리"]),
+            "본사관리 정규직 인원":    hc["본사관리 정규직"],
+            "본사관리 정규직 비중(%)": sub_pct(hc["본사관리 정규직"], hc["본사관리 정규직"], hc["본사관리 기간제"]),
+            "본사관리 기간제 인원":    hc["본사관리 기간제"],
+            "본사관리 기간제 비중(%)": sub_pct(hc["본사관리 기간제"], hc["본사관리 정규직"], hc["본사관리 기간제"]),
+            "총인원":                total,
         }
 
     # 열 = 회사, 행 = 지표
