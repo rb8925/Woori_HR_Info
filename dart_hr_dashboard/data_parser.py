@@ -11,7 +11,7 @@ RECENT_YEAR = 2025
 PREV_YEAR   = 2024
 TREND_YEARS = [2025, 2024, 2023, 2022]   # 가장 최근 → 가장 오래된 순
 
-CACHE_PATH = Path("data/raw_cache.json")
+CACHE_PATH = Path(__file__).parent / "data" / "raw_cache.json"
 
 # ── 사업부 섹션 매핑 ──────────────────────────────────────────────────────────
 # 값: 해당 카테고리에 속하는 fo_bbm 패턴 목록 (공백 정규화 후 부분일치)
