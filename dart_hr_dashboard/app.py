@@ -405,6 +405,13 @@ st.caption(f"기준: {RECENT_YEAR}년 사업보고서 | 개별재무제표 | DAR
            f"노란색 열 = {HIGHLIGHT_CO}")
 
 # ── 데이터 로드 ───────────────────────────────────────────────────────────────
+from data_parser import CACHE_PATH
+with st.expander("🔍 디버그 (임시)", expanded=False):
+    st.write("캐시 경로:", str(CACHE_PATH))
+    st.write("캐시 존재:", CACHE_PATH.exists())
+    from dart_api import _get_api_key
+    key = _get_api_key()
+    st.write("API 키 길이:", len(key), "/ 앞 4자:", key[:4] if key else "(없음)")
 emp_data, fin_data = _load()
 t1_raw      = build_table1(emp_data, fin_data, RECENT_YEAR)
 t1_raw_prev = build_table1(emp_data, fin_data, PREV_YEAR)
