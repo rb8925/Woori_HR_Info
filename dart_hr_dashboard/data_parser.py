@@ -1,10 +1,19 @@
 import json
+import re as _re_dp
 import time
 from pathlib import Path
 
 import pandas as pd
 
-from dart_api import COMPANIES, fetch_employee_info, fetch_financial_stmt, fetch_pangwanbi_from_html
+from dart_api import (
+    COMPANIES,
+    T3_ALL_COMPANIES,
+    T3_COMPANIES_ORDERED,
+    fetch_employee_info,
+    fetch_executive_count,
+    fetch_financial_stmt,
+    fetch_pangwanbi_from_html,
+)
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
 RECENT_YEAR = 2025
@@ -68,6 +77,43 @@ SECTION_MAP: dict[str, dict[str, list[str]] | None] = {
         "본사영업": ["본점영업"],
         "본사관리": ["본사지원"],
     },
+    # Tables 1&2 신규 회사
+    "대신증권": {
+        "리테일":  ["영업점"],
+        "본사영업": ["본사영업"],   # "본사영업, 운영, 리서치" 부분일치
+        "본사관리": ["관리직"],     # "본사 관리직" 부분일치
+    },
+    "교보증권": {
+        "리테일":  ["영업"],
+        "본사영업": [],             # 별도 HQ 영업 없음
+        "본사관리": ["지원"],
+    },
+    # Table 3 전용 신규 회사
+    "삼성증권": {
+        "리테일":  ["위탁매매"],
+        "본사영업": ["기업금융", "자기매매", "기업영업"],
+        "본사관리": ["기타"],
+    },
+    "하나증권": {
+        "리테일":  ["영업점"],
+        "본사영업": ["본사영업/운용/리서치"],
+        "본사관리": ["본사지원"],
+    },
+    "신한투자증권": {
+        "리테일":  ["리테일"],
+        "본사영업": ["본사영업"],
+        "본사관리": ["관리지원"],
+    },
+    "한화투자증권": {
+        "리테일":  ["지점영업", "지점지원"],
+        "본사영업": ["본사영업"],
+        "본사관리": ["본사지원"],
+    },
+    "신영증권": {
+        "리테일":  ["영업점"],
+        "본사영업": ["본사영업/운용"],
+        "본사관리": ["본사관리"],
+    },
 }
 
 # ── 유틸리티 ──────────────────────────────────────────────────────────────────
@@ -116,15 +162,14 @@ def _save_cache(data: dict):
     CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict]:
+def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict, str]:
     """
     모든 회사의 직원현황(emp)과 재무데이터(fin)를 수집한다.
 
-    캐시가 있으면 API 호출 없이 반환하고, 없으면 DART에서 가져와 저장한다.
-
     반환:
         emp_data[company][year] = [rows...]
-        fin_data[company][year] = {"자기자본": int, "세전이익": int, "영업외손익": int, "판관비": int}
+        fin_data[company][year] = {"자기자본": int, ...}
+        source: "캐시" | "실시간 수집"
     """
     cache = _load_cache() if use_cache else {}
     if cache.get("emp_data") and cache.get("fin_data"):
@@ -135,7 +180,7 @@ def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict]:
             fin_raw = cache["fin_data"]
             emp_data = {co: {int(y): rows for y, rows in yrs.items()} for co, yrs in emp_raw.items()}
             fin_data = {co: {int(y): fin  for y, fin  in yrs.items()} for co, yrs in fin_raw.items()}
-            return emp_data, fin_data
+            return emp_data, fin_data, "캐시"
         print("캐시에 최신 연도 데이터 없음 — 재수집")
 
     emp_data: dict[str, dict[int, list]] = {}
@@ -186,7 +231,7 @@ def fetch_all_raw(use_cache: bool = True) -> tuple[dict, dict]:
         for co, yrs in fin_data.items()
     }})
     print("\n캐시 저장 완료")
-    return emp_data, fin_data
+    return emp_data, fin_data, "실시간 수집"
 
 # ── 집계 함수 ─────────────────────────────────────────────────────────────────
 
@@ -344,6 +389,187 @@ def build_table2(emp_data: dict, fin_data: dict) -> pd.DataFrame:
             f"순영업수익 {y2}년(억원)": _억(nor_by_yr[y2]),
             f"순영업수익 {y3}년(억원)": _억(nor_by_yr[y3]),
             "순영업수익 평균(억원)":    _억(nor_avg),
+        }
+
+    return pd.DataFrame(rows)
+
+
+# ── T3 유틸리티 ──────────────────────────────────────────────────────────────
+
+def _parse_tenure(s) -> float | None:
+    """근속연수 파싱: '12.5 ' 또는 '13년6개월' 형식 모두 처리."""
+    if s is None or str(s).strip() in ("-", ""):
+        return None
+    s = str(s).strip()
+    m = _re_dp.match(r"(\d+)년\s*(?:(\d+)개월)?", s)
+    if m:
+        years = int(m.group(1))
+        months = int(m.group(2)) if m.group(2) else 0
+        return round(years + months / 12, 2)
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _avg_salary_tenure(rows: list[dict]) -> tuple[float | None, float | None]:
+    """
+    empSttus rows에서 가중평균 급여(백만원)와 평균근속(년)을 계산한다.
+    jan_salary_am: 1인 평균급여액(원), avrg_cnwk_sdytrn: 평균근속
+    """
+    sal_w = sal_s = ten_w = ten_s = 0.0
+    for row in rows:
+        sm = _safe_int(row.get("sm", 0))
+        if sm <= 0:
+            continue
+        sal_raw = str(row.get("jan_salary_am", "")).replace(",", "").strip()
+        ten_raw = row.get("avrg_cnwk_sdytrn")
+        try:
+            sal = float(sal_raw) / 1e6  # 원 → 백만원
+            sal_w += sal * sm
+            sal_s += sm
+        except (ValueError, TypeError):
+            pass
+        ten = _parse_tenure(ten_raw)
+        if ten is not None:
+            ten_w += ten * sm
+            ten_s += sm
+    avg_sal = round(sal_w / sal_s, 0) if sal_s > 0 else None
+    avg_ten = round(ten_w / ten_s, 1) if ten_s > 0 else None
+    return avg_sal, avg_ten
+
+
+def _조원(value: int | None) -> float | None:
+    """원 단위 → 조원 (소수점 2자리)."""
+    if value is None:
+        return None
+    return round(value / 1e12, 2)
+
+
+def _sum_or_none(*vals) -> int | None:
+    clean = [v for v in vals if v is not None]
+    return sum(clean) if clean else None
+
+
+# ── T3 데이터 수집 & 캐싱 ────────────────────────────────────────────────────
+
+def fetch_t3_raw(use_cache: bool = True) -> tuple[dict, dict, dict, str]:
+    """
+    Table 3 전용 데이터 수집.
+    반환: (t3_emp_data, t3_fin_data, t3_exec_data, source)
+      source: "캐시" | "실시간 수집"
+    """
+    cache = _load_cache() if use_cache else {}
+    t3_emp  = {co: {int(y): r for y, r in yrs.items()}
+               for co, yrs in cache.get("t3_emp_data", {}).items()}
+    t3_fin  = {co: {int(y): f for y, f in yrs.items()}
+               for co, yrs in cache.get("t3_fin_data", {}).items()}
+    t3_exec = {co: {int(y): cnt for y, cnt in yrs.items()}
+               for co, yrs in cache.get("t3_exec_data", {}).items()}
+
+    # 기존 COMPANIES 데이터도 우선 반영
+    for co, yrs in cache.get("emp_data", {}).items():
+        if co in T3_ALL_COMPANIES and co not in t3_emp:
+            t3_emp[co] = {int(y): r for y, r in yrs.items()}
+    for co, yrs in cache.get("fin_data", {}).items():
+        if co in T3_ALL_COMPANIES and co not in t3_fin:
+            t3_fin[co] = {int(y): f for y, f in yrs.items()}
+
+    # 완전성 체크: 모든 T3 회사에 RECENT_YEAR emp + exec 있는지
+    complete = all(
+        RECENT_YEAR in t3_emp.get(co, {}) and
+        RECENT_YEAR in t3_exec.get(co, {})
+        for co in T3_COMPANIES_ORDERED
+    )
+    if complete and use_cache:
+        print("T3 캐시에서 데이터 로드")
+        return t3_emp, t3_fin, t3_exec, "캐시"
+
+    print("T3 데이터 수집 중...")
+    for company, corp_code in T3_ALL_COMPANIES.items():
+        # emp/fin: 캐시에 없으면 수집
+        if RECENT_YEAR not in t3_emp.get(company, {}):
+            t3_emp.setdefault(company, {})
+            t3_fin.setdefault(company, {})
+            for year in TREND_YEARS:
+                rows = fetch_employee_info(corp_code, year)
+                t3_emp[company][year] = rows
+                time.sleep(0.25)
+            for query_year, (cur_yr, prv_yr) in [(2025, (2025, 2024)), (2024, (2024, 2023)), (2023, (2023, 2022))]:
+                cur, prv = fetch_financial_stmt(corp_code, query_year)
+                if cur:
+                    t3_fin[company][cur_yr] = cur
+                if prv:
+                    t3_fin[company][prv_yr] = prv
+
+        # exec: 항상 최신 연도만 수집 (캐시 없으면)
+        if RECENT_YEAR not in t3_exec.get(company, {}):
+            t3_exec.setdefault(company, {})
+            cnt = fetch_executive_count(corp_code, RECENT_YEAR)
+            t3_exec[company][RECENT_YEAR] = cnt
+            print(f"  [{company}] 임원 {RECENT_YEAR}: {cnt}명")
+
+    # 캐시 저장
+    cache["t3_emp_data"]  = {co: {str(y): r for y, r in yrs.items()} for co, yrs in t3_emp.items()}
+    cache["t3_fin_data"]  = {co: {str(y): f for y, f in yrs.items()} for co, yrs in t3_fin.items()}
+    cache["t3_exec_data"] = {co: {str(y): cnt for y, cnt in yrs.items()} for co, yrs in t3_exec.items()}
+    _save_cache(cache)
+    print("T3 캐시 저장 완료")
+    return t3_emp, t3_fin, t3_exec, "실시간 수집"
+
+
+# ── Table 3 빌더 ─────────────────────────────────────────────────────────────
+
+def build_table3(t3_emp: dict, t3_fin: dict, t3_exec: dict,
+                 year: int = RECENT_YEAR) -> pd.DataFrame:
+    """
+    Table 3 — 임원인력 상세현황 (행: 지표, 열: 회사)
+    """
+    rows = {}
+    for company in T3_COMPANIES_ORDERED:
+        emp_rows  = t3_emp.get(company, {}).get(year, [])
+        fin       = t3_fin.get(company, {}).get(year)
+        exec_cnt  = t3_exec.get(company, {}).get(year, 0)
+        sec_map   = SECTION_MAP.get(company)
+
+        hc    = _headcount_by_section(emp_rows, sec_map)
+        total = hc["총인원"] or 0
+        retail = hc["리테일"] or 0
+
+        eq = fin.get("자기자본") if fin else None
+
+        exec_pct        = round(exec_cnt / total * 100, 2)   if total > 0       else None
+        retail_pct      = round(retail / total * 100, 1)     if total > 0       else None
+        non_ret         = total - retail
+        ret_excl_pct    = round(exec_cnt / non_ret * 100, 2) if non_ret > 0     else None
+
+        avg_sal, avg_ten = _avg_salary_tenure(emp_rows)
+
+        reg_total = _sum_or_none(hc["리테일 정규직"], hc["본사영업 정규직"], hc["본사관리 정규직"])
+        cnt_total = _sum_or_none(hc["리테일 기간제"], hc["본사영업 기간제"], hc["본사관리 기간제"])
+
+        rows[company] = {
+            "자기자본(조원)":           _조원(eq),
+            "총인원":                   total or None,
+            "임원 인원수":              exec_cnt or None,
+            "임원 비중(%)":             exec_pct,
+            "리테일 직원수":            retail or None,
+            "리테일 비중(%)":           retail_pct,
+            "리테일 제외 임원 비중(%)": ret_excl_pct,
+            "평균급여(백만원)":         avg_sal,
+            "평균근속(년)":             avg_ten,
+            "리테일 정규직":            hc["리테일 정규직"],
+            "리테일 계약직":            hc["리테일 기간제"],
+            "리테일 소계":              retail or None,
+            "본사영업 정규직":          hc["본사영업 정규직"],
+            "본사영업 계약직":          hc["본사영업 기간제"],
+            "본사영업 소계":            hc["본사영업"],
+            "본사관리 정규직":          hc["본사관리 정규직"],
+            "본사관리 계약직":          hc["본사관리 기간제"],
+            "본사관리 소계":            hc["본사관리"],
+            "정규직 총합":              reg_total,
+            "계약직 총합":              cnt_total,
+            "총합":                     total or None,
         }
 
     return pd.DataFrame(rows)

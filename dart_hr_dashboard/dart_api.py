@@ -47,7 +47,31 @@ COMPANIES = {
     "현대차증권":   "00137997",
     "IBK투자증권":  "00684918",
     "유진투자증권": "00131054",
+    "대신증권":     "00110893",
+    "교보증권":     "00113359",
 }
+
+# Table 3 전용 추가 회사 (COMPANIES에 없는 회사)
+T3_NEW_COMPANIES = {
+    "삼성증권":     "00104856",
+    "하나증권":     "00113465",
+    "신한투자증권": "00138321",
+    "한화투자증권": "00148610",
+    "신영증권":     "00136721",
+}
+
+# Table 3 회사 표시 순서
+T3_COMPANIES_ORDERED = [
+    "한국투자증권", "미래에셋증권", "삼성증권",
+    "NH투자증권", "KB증권", "하나증권", "신한투자증권",
+    "메리츠증권", "키움증권",
+    "대신증권", "교보증권", "한화투자증권", "신영증권",
+    "현대차증권", "IBK투자증권", "유안타증권", "유진투자증권",
+]
+
+# T3 전체 corp_code 조회용 (기존 + 신규)
+_ALL_CODES = {**COMPANIES, **T3_NEW_COMPANIES}
+T3_ALL_COMPANIES = {co: _ALL_CODES[co] for co in T3_COMPANIES_ORDERED}
 
 # 우리투자증권은 2024년이 첫 사업보고서이므로 2024~2020 조회
 # 나머지 회사는 2023~2019 조회 (2024 사보는 2025년 3월 제출 → 대부분 있음)
@@ -325,6 +349,31 @@ def fetch_pangwanbi_from_html(corp_code: str, bsns_year: int, delay: float = 0.5
                 return result
 
     return {}
+
+
+def fetch_executive_count(corp_code: str, year: int) -> int:
+    """
+    DART exctvSttus API로 상근 임원 인원수를 조회한다.
+    비상근 임원(사외이사, 감사위원 등)은 제외한다.
+    """
+    url = f"{BASE_URL}/exctvSttus.json"
+    params = {
+        "crtfc_key": _get_api_key(),
+        "corp_code": corp_code,
+        "bsns_year": str(year),
+        "reprt_code": "11011",
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        time.sleep(0.2)
+        if data.get("status") == "000":
+            return sum(1 for r in data.get("list", []) if r.get("fte_at") == "상근")
+        return 0
+    except Exception as e:
+        print(f"[임원 오류] corp={corp_code}, year={year}: {e}")
+        return 0
 
 
 if __name__ == "__main__":
